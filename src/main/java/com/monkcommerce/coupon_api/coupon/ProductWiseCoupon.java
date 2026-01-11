@@ -53,8 +53,8 @@ public class ProductWiseCoupon implements CouponHandler {
         }
 
         // Validation: Discount must be present and positive
-        if (discount == null || discount <= 0) {
-            return "Product-wise coupon must have a valid discount (> 0)";
+        if (discount == null || discount <= 0 || discount > 100) {
+            return "Product-wise coupon must have a valid discount (> 0) OR discount (<= 100)";
         }
 
         // Validation: Only one active coupon allowed per product

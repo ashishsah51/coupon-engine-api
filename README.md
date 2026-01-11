@@ -633,6 +633,7 @@ mvn test -Dtest=BxGyCouponServiceTest
 - [ ] Scheduled activation/deactivation
 - [ ] Human-readable coupon codes
 - [ ] Analytics and redemption tracking
+- [ ] Imporve Update functionality and clean code for apply copon or applicable coupon
 
 ---
 

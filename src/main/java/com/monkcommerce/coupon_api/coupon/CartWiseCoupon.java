@@ -2,6 +2,9 @@ package com.monkcommerce.coupon_api.coupon;
 
 import com.monkcommerce.coupon_api.exception.CouponException;
 import com.monkcommerce.coupon_api.model.Coupon;
+import com.monkcommerce.coupon_api.model.cart.Cart;
+import com.monkcommerce.coupon_api.model.cart.CartItem;
+import com.monkcommerce.coupon_api.model.response.ApplyCouponResponse;
 
 import java.util.Map;
 import java.util.TreeMap;
@@ -49,17 +52,14 @@ public class CartWiseCoupon implements CouponHandler {
         }
 
         if(cartThreshold <= 0 || discountPercentage < 0 || discountPercentage > 100) {
-            return String.format("Cart-wise coupon contains cartThreshold amount <= 0 or discountPercentage < 0 OR discountPercentage > 100");
+            return String.format("Invalid cart-wise coupon: cart threshold must be greater than 0 and discount percentage must be between 0 and 100.");
         }
 
         // Fetch nearest lower and higher thresholds (O(log n))
-        Map.Entry<Integer, Double> lowerThresholdEntry =
-                cartDiscountIndex.lowerEntry(cartThreshold);
+        Map.Entry<Integer, Double> lowerThresholdEntry = cartDiscountIndex.lowerEntry(cartThreshold);
 
-        Map.Entry<Integer, Double> higherThresholdEntry =
-                cartDiscountIndex.higherEntry(cartThreshold);
+        Map.Entry<Integer, Double> higherThresholdEntry = cartDiscountIndex.higherEntry(cartThreshold);
 
-        // Rule 2:
         // A lower cart threshold must NOT provide a higher or equal discount percentage.
         // Otherwise, customers would get better discounts for spending less.
         if (lowerThresholdEntry != null &&
@@ -67,7 +67,6 @@ public class CartWiseCoupon implements CouponHandler {
                 return String.format("Invalid cart-wise coupon: lower cart threshold %d has higher or equal discount %.2f%% than new coupon discount %.2f%%",lowerThresholdEntry.getKey(),lowerThresholdEntry.getValue(),discountPercentage);
         }
 
-        // Rule 3:
         // A higher cart threshold must NOT provide a lower or equal discount percentage.
         // Otherwise, customers spending more would get worse discounts.
         if (higherThresholdEntry != null &&
@@ -110,6 +109,23 @@ public class CartWiseCoupon implements CouponHandler {
             cartDiscountIndex.remove(threshold);
             couponMap.remove(threshold+"");
         }
+    }
+
+    // Get Discount after applyting coupon on cart.
+    public ApplyCouponResponse getApplyCouponOnCart(Coupon coupon, Cart cart) {
+        double totalPrice = 0.00, totalDiscount = 0.00;
+        for (CartItem item : cart.items) {
+            if (item == null || item.price<=0 || item.quantity <= 0) throw new CouponException("Invalid cart item data");
+            totalPrice += item.price * item.quantity;
+            item.totalDiscount = 0.0;
+        }
+        totalDiscount = (totalPrice * coupon.getDetails().discount) / 100.0;
+        return new ApplyCouponResponse(
+                cart.items,
+                totalPrice,
+                totalDiscount,
+                totalPrice - totalDiscount
+        );
     }
 
 }

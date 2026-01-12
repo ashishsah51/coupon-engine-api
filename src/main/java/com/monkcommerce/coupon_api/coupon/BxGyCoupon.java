@@ -2,8 +2,10 @@ package com.monkcommerce.coupon_api.coupon;
 
 import com.monkcommerce.coupon_api.exception.CouponException;
 import com.monkcommerce.coupon_api.model.Coupon;
+import com.monkcommerce.coupon_api.model.cart.Cart;
+import com.monkcommerce.coupon_api.model.cart.CartItem;
+import com.monkcommerce.coupon_api.model.response.ApplyCouponResponse;
 
-import java.util.List;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -135,4 +137,108 @@ public class BxGyCoupon implements CouponHandler {
             couponMap.remove(newKey);
         }
     }
+
+    // Get Discount after applyting coupon on cart.
+    public ApplyCouponResponse getApplyCouponOnCart(Coupon coupon, Cart cart) {
+
+        Set<Integer> buyIds = new HashSet<>(coupon.getDetails().buyProducts);
+        Set<Integer> getIds = new HashSet<>(coupon.getDetails().getProducts);
+
+        int totalBuyQty = cart.items.stream()
+            .filter(item -> buyIds.contains(item.productId))
+            .mapToInt(item -> item.quantity)
+            .sum();
+
+        double totalPrice = 0.0, totalDiscount = 0.0;
+
+        Collections.sort(cart.items, (a, b) -> Double.compare(b.price, a.price));
+
+        int repetitionLimit = coupon.getDetails().repetitionLimit;
+        int buyQuantity = coupon.getDetails().buyQuantity, getQuantity = coupon.getDetails().getQuantity;
+
+        int i=0, size = cart.items.size(), maxIdx = -1;
+        double maxPartialDiscout = 0.00;
+
+        l:
+        while(i < size) {
+            CartItem item = cart.items.get(i);
+            if (item == null || item.price<=0 || item.quantity <= 0) throw new CouponException("Invalid cart item data");
+            totalPrice += item.quantity * item.price;
+            int currQty = item.quantity;
+            int otherBuyQty = totalBuyQty - currQty;
+            if(totalBuyQty < buyQuantity || repetitionLimit <= 0) {
+                i++;
+                continue;
+            }
+            int factor, freeItem; 
+            if(getIds.contains(item.productId) && buyIds.contains(item.productId)) {
+                factor = Math.max(Math.min(otherBuyQty / buyQuantity, repetitionLimit), 0);
+                repetitionLimit -= factor;
+                freeItem = factor * getQuantity;
+                if(freeItem >= currQty) {
+                    item.totalDiscount = currQty * item.price;
+                    totalBuyQty -= factor * buyQuantity;
+                    totalBuyQty -= currQty;
+                } else {
+                    double currDiscount = freeItem * item.price;
+                    totalBuyQty = totalBuyQty - (factor * buyQuantity) - freeItem; 
+                    factor = Math.min(totalBuyQty / (buyQuantity + getQuantity), repetitionLimit);
+                    repetitionLimit -= factor;
+                    currDiscount += (factor * getQuantity) * item.price;
+                    totalBuyQty = totalBuyQty - factor * (buyQuantity + getQuantity);
+                    item.totalDiscount = currDiscount;
+                    if(totalBuyQty > buyQuantity && repetitionLimit > 0) {
+                        maxIdx = i;
+                        maxPartialDiscout = (totalBuyQty - buyQuantity) * item.price;
+                        totalDiscount += item.totalDiscount;
+                        i++;
+                        break l;
+                    }
+                }
+            } else if(getIds.contains(item.productId)) {
+                factor = Math.max(Math.min(totalBuyQty / buyQuantity, repetitionLimit), 0);
+                repetitionLimit -= factor;
+                freeItem = factor * getQuantity;
+                if(freeItem >= currQty) {
+                    item.totalDiscount = currQty * item.price;
+                    totalBuyQty -= factor * buyQuantity;
+                    totalBuyQty -= currQty;
+                } else {
+                    item.totalDiscount = freeItem * item.price;
+                    totalBuyQty -= factor * buyQuantity;
+                }
+            }
+            totalDiscount += item.totalDiscount;
+            i++;
+        }
+
+        while(i < size) {
+            CartItem item = cart.items.get(i);
+            if (item == null || item.price<=0 || item.quantity <= 0) throw new CouponException("Invalid cart item data");
+            totalPrice += item.quantity * item.price;
+            if(getIds.contains(item.productId)) {
+                int freeItem = Math.min(item.quantity, getQuantity);
+                if(freeItem * item.price > maxPartialDiscout) {
+                    maxPartialDiscout = freeItem * item.price;
+                    maxIdx = i;
+                }
+            }
+            i++;
+        }
+
+        if(maxIdx != -1) {
+            CartItem item = cart.items.get(maxIdx);
+            item.totalDiscount += maxPartialDiscout;
+            totalDiscount += item.totalDiscount;
+        }
+
+        return new ApplyCouponResponse(
+                cart.items,
+                totalPrice,
+                totalDiscount,
+                totalPrice-totalDiscount
+        );
+    }
+
+    
 }

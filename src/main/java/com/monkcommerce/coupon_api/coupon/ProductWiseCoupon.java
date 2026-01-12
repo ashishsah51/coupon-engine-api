@@ -2,6 +2,9 @@ package com.monkcommerce.coupon_api.coupon;
 
 import com.monkcommerce.coupon_api.exception.CouponException;
 import com.monkcommerce.coupon_api.model.Coupon;
+import com.monkcommerce.coupon_api.model.cart.Cart;
+import com.monkcommerce.coupon_api.model.cart.CartItem;
+import com.monkcommerce.coupon_api.model.response.ApplyCouponResponse;
 
 import java.util.Map;
 
@@ -98,5 +101,26 @@ public class ProductWiseCoupon implements CouponHandler {
         }
     }
 
+    // Get Discount after applyting coupon on cart.
+    public ApplyCouponResponse getApplyCouponOnCart(Coupon coupon, Cart cart) {
+        double totalPrice = 0.00, totalDiscount = 0.00;
+        for (CartItem item : cart.items) {
+            if (item == null || item.price<=0 || item.quantity <= 0) throw new CouponException("Invalid cart item data");
+            totalPrice += item.price * item.quantity;
+            if (item.productId == coupon.getDetails().productId) {
+                item.totalDiscount = (item.price * item.quantity * coupon.getDetails().discount) / 100.0;
+                totalDiscount += item.totalDiscount;
+            } else {
+                item.totalDiscount = 0.0;
+            }
+        }
+
+        return new ApplyCouponResponse(
+                cart.items,
+                totalPrice,
+                totalDiscount,
+                totalPrice - totalDiscount
+        );
+    }
     
 }

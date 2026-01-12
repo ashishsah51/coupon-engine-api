@@ -1,19 +1,19 @@
 package com.monkcommerce.coupon_api.service;
 
 import com.monkcommerce.coupon_api.coupon.CouponHandler;
+import com.monkcommerce.coupon_api.coupon.ProductWiseCoupon;
 import com.monkcommerce.coupon_api.exception.CouponException;
 import com.monkcommerce.coupon_api.factory.CouponFactory;
 import com.monkcommerce.coupon_api.model.Coupon;
 import com.monkcommerce.coupon_api.model.CouponDetails;
-import com.monkcommerce.coupon_api.model.CouponType;
 import com.monkcommerce.coupon_api.model.cart.Cart;
 import com.monkcommerce.coupon_api.model.cart.CartItem;
 import com.monkcommerce.coupon_api.model.response.ApplicableCouponItem;
 import com.monkcommerce.coupon_api.model.response.ApplicableCouponsResponse;
 import com.monkcommerce.coupon_api.model.response.ApplyCouponResponse;
-import com.monkcommerce.coupon_api.model.response.applyCouponResponse;
 import com.monkcommerce.coupon_api.store.CouponIndexes;
-import com.monkcommerce.coupon_api.util.CouponDetailsMerger;
+import com.monkcommerce.coupon_api.coupon.BxGyCoupon;
+import com.monkcommerce.coupon_api.coupon.CartWiseCoupon;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -55,10 +55,7 @@ public class CouponService {
     public List<Coupon> getCoupon(boolean active) {
         return store.values()
             .stream()
-            // Defensive checks
             .filter(c -> c != null && c.getDetails() != null && c.getType() != null)
-
-            // ONLY isActive flag matters
             .filter(c -> {
                 Boolean isActive = c.getDetails().isActive == null || c.getDetails().isActive;
                 return Boolean.TRUE.equals(isActive) == active;
@@ -91,16 +88,12 @@ public class CouponService {
             throw new CouponException("Coupon type cannot be modified");
         }
 
-        // System.out.println(" updatedCoupon "+updatedCoupon.getDetails().discount + " , "+updatedCoupon.getDetails().productId);
-
         // Merge existing coupon that are not changes
         updatedCoupon.setId(couponId);
         updatedCoupon.setDetails(merge(
             updatedCoupon.getDetails(),
             existing.getDetails()
         ));
-
-        // System.out.println(" existing "+existing.getDetails().discount + " , "+existing.getDetails().productId);
 
         // Get the proper handler based on coupon type
         CouponHandler handler = CouponFactory.create(existing, indexes);
@@ -133,11 +126,8 @@ public class CouponService {
         return existing;
     }
 
-    // Update Coupon
-    /**
-     * @param cart
-     * @return
-     * */
+   
+    // Applicable all product wise coupon, best Cart-wise coupon and all BXGY coupon and get best discount || return the result with highest discount first in order
     @PostMapping
     public ApplicableCouponsResponse getApplicableCoupons(Cart cart) {
 
@@ -147,136 +137,64 @@ public class CouponService {
 
         List<CartItem> cartItems = cart.items;
         double totalPrice = 0.0;
-
-        ApplicableCouponsResponse response =
-                new ApplicableCouponsResponse(new ArrayList<>());
-
+        ApplicableCouponsResponse response = new ApplicableCouponsResponse(new ArrayList<>());
         Map<Integer, Double> productCouponIndex = indexes.productIndex;
         Map<String, Coupon> couponMap = indexes.couponMap;
 
-        /* ---------------- PRODUCT-WISE ---------------- */
-
         for (CartItem item : cartItems) {
-
-            if (item == null) {
+            if (item == null || item.price<=0 || item.quantity <= 0) {
                 throw new CouponException("Invalid cart item data");
             }
-
             totalPrice += item.price * item.quantity;
-
+            // Apply all product wise coupon
             if (productCouponIndex.containsKey(item.productId)) {
                 double percent = productCouponIndex.get(item.productId);
                 double discount = (item.price * item.quantity) * percent / 100;
-
                 Coupon coupon = couponMap.get("" + item.productId);
-
                 response.applicable_coupons.add(
-                    new ApplicableCouponItem(
+                new ApplicableCouponItem(
                         coupon.getId(),
-                        "product-wise",
+                        "PRODUCT_WISE",
                         discount
                     )
                 );
             }
         }
 
-        /* ---------------- CART-WISE (BEST COUPON) ---------------- */
-
+        // Apply nearest threshold coupon instead of all
         TreeMap<Integer, Double> cartIndex = indexes.cartIndex;
-
-        Map.Entry<Integer, Double> entry =
-                cartIndex.floorEntry((int) totalPrice);
-
+        Map.Entry<Integer, Double> entry = cartIndex.floorEntry((int) totalPrice);
         if (entry != null) {
             double percent = entry.getValue();
             double discount = totalPrice * percent / 100;
-
             Coupon coupon = couponMap.get("" + entry.getKey());
-
             response.applicable_coupons.add(
                 new ApplicableCouponItem(
                     coupon.getId(),
-                    "cart-wise",
+                    "CART_WISE",
                     discount
                 )
             );
         }
 
-        /* ---------------- BXGY COUPONS ---------------- */
+        // Apply BXGY coupon
         for (String key : indexes.bxgyIndex) {
-
             Coupon coupon = couponMap.get(key);
-            CouponDetails d = coupon.getDetails();
-            if (!d.isActive) continue;
-            applyBxGy(coupon, cart, response);
+            BxGyCoupon handler = new BxGyCoupon(coupon, null, null);
+            ApplyCouponResponse bxgyResponse = handler.getApplyCouponOnCart(coupon, cart);
+            response.applicable_coupons.add(
+                new ApplicableCouponItem(
+                    coupon.getId(),
+                    "BXGY",
+                    bxgyResponse.getTotalDiscount()
+                )
+            );
         }
-
-
+        Collections.sort(response.applicable_coupons, (a, b) -> Double.compare(b.discount, a.discount));
         return response;
     }
 
-    /**
-     * BXGY IMPLEMENTATION
-     */
-    private void applyBxGy(
-            Coupon coupon,
-            Cart cart,
-            ApplicableCouponsResponse response
-    ) {
-        CouponDetails d = coupon.getDetails();
-
-        Set<Integer> buySet = new HashSet<>(d.buyProducts);
-        Set<Integer> getSet = new HashSet<>(d.getProducts);
-
-        // Count total BUY quantity (mixed allowed)
-        int totalBuyQty = 0;
-        for (CartItem item : cart.items) {
-            if (buySet.contains(item.productId)) {
-                totalBuyQty += item.quantity;
-            }
-        }
-
-        int possibleSets = totalBuyQty / d.buyQuantity;
-        int applicableSets =
-                Math.min(possibleSets, d.repetitionLimit);
-
-        if (applicableSets <= 0) return;
-
-        int totalFreeItems =
-                applicableSets * d.getQuantity;
-
-        // Collect GET product prices
-        List<Double> eligiblePrices = new ArrayList<>();
-
-        for (CartItem item : cart.items) {
-            if (getSet.contains(item.productId)) {
-                for (int i = 0; i < item.quantity; i++) {
-                    eligiblePrices.add(item.price);
-                }
-            }
-        }
-
-        if (eligiblePrices.isEmpty()) return;
-
-        // 3️⃣ Maximize discount
-        eligiblePrices.sort(Collections.reverseOrder());
-
-        double discount = 0;
-        for (int i = 0; i < Math.min(totalFreeItems, eligiblePrices.size()); i++) {
-            discount += eligiblePrices.get(i);
-        }
-
-        if (discount > 0) {
-            response.applicable_coupons.add(
-                new ApplicableCouponItem(
-                    coupon.getId(),
-                    "bxgy",
-                    discount
-                )
-            );
-        }
-    }
-
+    // Apply coupons with provided coupon id and get maximum discount
     @PostMapping
     public ApplyCouponResponse applyCouponToCart(long couponId, Cart cart) {
 
@@ -289,125 +207,17 @@ public class CouponService {
             throw new CouponException("Coupon not found or inactive");
         }
 
-        List<CartItem> cartItems = cart.items;
-        double totalPrice = 0.0;
-        double totalDiscount = 0.0;
-
         String ctype = coupon.getType().name();
-
-        /* ---------------- CART WISE ---------------- */
-        if (ctype.equals("CART_WISE")) {
-
-            for (CartItem item : cartItems) {
-                if (item == null) throw new CouponException("Invalid cart item data");
-
-                totalPrice += item.price * item.quantity;
-                item.totalDiscount = 0.0;
-            }
-
-            totalDiscount = (totalPrice * coupon.getDetails().discount) / 100.0;
-            double finalPrice = totalPrice - totalDiscount;
-
-            return new ApplyCouponResponse(
-                    cartItems,
-                    totalPrice,
-                    totalDiscount,
-                    finalPrice
-            );
-        }
-
-        /* ---------------- PRODUCT WISE ---------------- */
-        else if (ctype.equals("PRODUCT_WISE")) {
-
-            for (CartItem item : cartItems) {
-                if (item == null) throw new CouponException("Invalid cart item data");
-
-                totalPrice += item.price * item.quantity;
-
-                if (item.productId == coupon.getDetails().productId) {
-                    item.totalDiscount =
-                            (item.price * item.quantity * coupon.getDetails().discount) / 100.0;
-                } else {
-                    item.totalDiscount = 0.0;
-                }
-            }
-
-            totalDiscount = cartItems.stream()
-                    .mapToDouble(i -> i.totalDiscount)
-                    .sum();
-
-            double finalPrice = totalPrice - totalDiscount;
-
-            return new ApplyCouponResponse(
-                    cartItems,
-                    totalPrice,
-                    totalDiscount,
-                    finalPrice
-            );
-        }
-
-        /* ---------------- BXGY ---------------- */
-        else if (ctype.equals("BXGY")) {
-
-            CouponDetails d = coupon.getDetails();
-
-            Set<Integer> buyIds = new HashSet<>(d.buyProducts);
-            Set<Integer> getIds = new HashSet<>(d.getProducts);
-
-            int totalBuyQty = 0;
-
-            for (CartItem item : cartItems) {
-                if (buyIds.contains(item.productId)) {
-                    totalBuyQty += item.quantity;
-                }
-                totalPrice += item.price * item.quantity;
-                item.totalDiscount = 0.0;
-            }
-
-            int possibleSets = totalBuyQty / d.buyQuantity;
-            int applicableSets = Math.min(possibleSets, d.repetitionLimit);
-
-            if (applicableSets > 0) {
-
-                int totalFreeItems = applicableSets * d.getQuantity;
-
-                List<CartItem> eligibleGetItems = cartItems.stream()
-                        .filter(ci -> getIds.contains(ci.productId))
-                        .collect(Collectors.toList());
-
-                List<Double> prices = new ArrayList<>();
-                Map<Double, CartItem> priceToItem = new HashMap<>();
-
-                for (CartItem ci : eligibleGetItems) {
-                    for (int i = 0; i < ci.quantity; i++) {
-                        prices.add(ci.price);
-                        priceToItem.put(ci.price, ci);
-                    }
-                }
-
-                prices.sort(Collections.reverseOrder());
-
-                int used = 0;
-                for (Double price : prices) {
-                    if (used >= totalFreeItems) break;
-                    CartItem ci = priceToItem.get(price);
-                    ci.totalDiscount += price;
-                    totalDiscount += price;
-                    used++;
-                }
-            }
-
-            double finalPrice = totalPrice - totalDiscount;
-
-            return new ApplyCouponResponse(
-                    cartItems,
-                    totalPrice,
-                    totalDiscount,
-                    finalPrice
-            );
-        }
-
-        else {
+        if (ctype.equals("CART_WISE")) { // For CART WISE
+            CartWiseCoupon handler = new CartWiseCoupon(coupon, null, null);
+            return handler.getApplyCouponOnCart(coupon, cart);
+        } else if (ctype.equals("PRODUCT_WISE")) { // For PRODUCT WISE
+            ProductWiseCoupon handler = new ProductWiseCoupon(coupon, null, null);
+            return handler.getApplyCouponOnCart(coupon, cart);
+        } else if (ctype.equals("BXGY")) { // For BXGY
+            BxGyCoupon handler = new BxGyCoupon(coupon, null, null);
+            return handler.getApplyCouponOnCart(coupon, cart);
+        } else {
             throw new CouponException("Unsupported coupon type");
         }
     }

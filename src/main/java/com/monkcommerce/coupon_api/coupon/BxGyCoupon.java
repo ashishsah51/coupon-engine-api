@@ -73,6 +73,7 @@ public class BxGyCoupon implements CouponHandler {
         List<Integer> getProductIds = temCoupon.getDetails().getProducts;
         Integer buyQuantity = temCoupon.getDetails().buyQuantity;
         Integer getQuantity = temCoupon.getDetails().getQuantity;
+        Integer getRepetitionLimit = temCoupon.getDetails().repetitionLimit;
 
         // Validation: Buy products must be present
         if (buyProductIds == null || buyProductIds.isEmpty()) {
@@ -92,6 +93,11 @@ public class BxGyCoupon implements CouponHandler {
         // Validation: Get quantity must be positive
         if (getQuantity == null || getQuantity <= 0) {
             return "BXGY coupon must have a valid getQuantity (> 0)";
+        }
+
+        // Validation: Get quantity must be positive
+        if (getRepetitionLimit == null || getRepetitionLimit <= 0) {
+            return "BXGY coupon must have a valid repetitionLimit (> 0)";
         }
 
         String newKey = generateUniqueKey(temCoupon);

@@ -51,8 +51,8 @@ public class CartWiseCoupon implements CouponHandler {
             return String.format("Cart-wise coupon already exists for cart threshold %d",cartThreshold);
         }
 
-        if(cartThreshold <= 0 || discountPercentage < 0 || discountPercentage > 100) {
-            return String.format("Invalid cart-wise coupon: cart threshold must be greater than 0 and discount percentage must be between 0 and 100.");
+        if(cartThreshold <= 0 || discountPercentage <= 0 || discountPercentage > 100) {
+            return String.format("Invalid cart-wise coupon: cart threshold must be greater than 0 and discount percentage must be between 1 and 100.");
         }
 
         // Fetch nearest lower and higher thresholds (O(log n))

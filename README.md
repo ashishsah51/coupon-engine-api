@@ -166,7 +166,7 @@ mvn spring-boot:run
 | Rule | Description |
 |------|-------------|
 | `discount` | Must be between 1–100 |
-| `isActive` | Required field |
+| `isActive` | Optional field -> Once you marked false then only it marked as coupon as false.|
 | Duplicates | Duplicate active coupons not allowed |
 
 ### CART_WISE Rules
@@ -178,6 +178,7 @@ mvn spring-boot:run
 | Monotonic Higher | Higher threshold cannot have lower discount |
 | Monotonic Lower | Lower threshold cannot have higher discount |
 | Inactive Bypass | Inactive coupons do not block new ones |
+| Required Field | threshold, discount |
 
 **Example of Invalid Scenarios:**
 - Coupon with threshold `100` gives `15%` discount
@@ -187,9 +188,10 @@ mvn spring-boot:run
 
 | Rule | Description |
 |------|-------------|
-| `productId` | Must be non-null |
-| `discount` | Must be greater than 0 |
+| `productId` | Must be non-null || Only Support Numeric Id |
+| `discount` | Must be between 1–100 |
 | Unique Product | Only one active coupon per product |
+| Required Field | productId, discount |
 
 ### BXGY Rules
 
@@ -199,7 +201,9 @@ mvn spring-boot:run
 | `getProducts` | Must not be empty |
 | `buyQuantity` | Must be greater than 0 |
 | `getQuantity` | Must be greater than 0 |
+| `repetitionLimit` | Must be greater than 0 |
 | Unique Config | Duplicate active BXGY coupons not allowed |
+| Required Field | buyProducts, getProducts, buyQuantity, getQuantity, repetitionLimit |
 
 ---
 
@@ -296,8 +300,7 @@ Returns coupon details if ID exists.
 
 - Coupon must exist
 - Coupon type cannot be changed
-- Partial updates are supported (only send fields you want to change)
-
+- The coupon status should not be updated to active if an active coupon with the same conditions already exists.
 **Example:** `PUT /coupons/1`
 
 **Request Body:**
@@ -369,7 +372,12 @@ All cart-related endpoints accept this format:
 
 **Endpoint:** `POST /applicable-coupons`
 
-Returns all coupons that can be applied to the given cart with their calculated discount amounts.
+Returns all coupons that can be applied to the given cart along with their calculated maximum discount amounts. For cart-wise coupons, only the nearest applicable threshold is applied to maximize the discount. (If required, we can also apply all threshold discounts.)
+
+### Rules
+
+- All items under the cart should be unique with productId.
+- Coupon type cannot be changed
 
 **Request Body:**
 ```json
